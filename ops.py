@@ -23,5 +23,5 @@ def entropy(probs, normalize):
     return tf.reduce_sum(entropy)
 
 
-def identity_initialization(input, batch_size, no_senses, embeddingdim):
-    return tf.reshape(tf.tile(tf.identity(input), multiples=[1, no_senses]), shape=[batch_size, no_senses, embeddingdim])
+def identity_initialization(input, vocab_size, no_senses, embeddingdim):
+    return tf.reshape(tf.tile(tf.identity(input), multiples=[1, no_senses]), shape=[vocab_size, no_senses, embeddingdim])
