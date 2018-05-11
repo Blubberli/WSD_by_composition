@@ -24,4 +24,5 @@ def entropy(probs, normalize):
 
 
 def identity_initialization(input, vocab_size, no_senses, embeddingdim):
+    print(no_senses)
     return tf.reshape(tf.tile(tf.identity(input), multiples=[1, no_senses]), shape=[vocab_size, no_senses, embeddingdim])

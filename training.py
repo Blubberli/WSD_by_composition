@@ -11,9 +11,13 @@ from holst import Data,  logger_config, evaluation
 from TrainingGraph import TrainingGraph
 from TrainingGraph import RunMode
 from identity_model import Identity_Model
+from identity_model_head import Identity_Model_Head
+from Identity_Model_bilinear_head import Identity_Model_Head_bilinear
+from Identity_Model_bilinear import Identity_Model_Mod_bilinear
+from identity_bilinear_both_positions import Identity_Model_bilineaer_both_positions
 import Evaluation
 
-def train(args, wsdmodel, training_data, validation_data, gensimmodel):
+def train(args, wsdmodel, training_data, validation_data, gensimmodel, both_positions):
     train_losses = []
     validation_losses = []
 
@@ -43,22 +47,23 @@ def train(args, wsdmodel, training_data, validation_data, gensimmodel):
                                         lookup_table=lookup_table,
                                         learning_rate=args.learning_rate,
                                         run_mode=RunMode.training,
-                                        alpha=0.7)
+                                        alpha=0.7,
+                                        both_positions=both_positions)
         with tf.variable_scope("model", reuse=True):
             validation_model = TrainingGraph(wsd_model=wsdmodel,
                                              batch_size=None,
                                              lookup_table=lookup_table,
                                              learning_rate=args.learning_rate,
                                              run_mode=RunMode.validation,
-                                             alpha=0.7)
+                                             alpha=0.7,
+                                             both_positions=both_positions)
 
         # init all variables
         sess.run(tf.global_variables_initializer())
         print("graphs are created")
         saver = tf.train.Saver(max_to_keep=0)
-        mod_embeddings = open("./modified.txt", "w")
-        #while current_patience < args.patience:
-        while epoch < 2:
+        while current_patience < args.patience:
+        #while epoch < 7:
 
             train_loss = 0.0
             validation_loss = 0.0
@@ -72,8 +77,8 @@ def train(args, wsdmodel, training_data, validation_data, gensimmodel):
                 pb = generic_utils.Progbar(td.no_batches)
                 # only executed if the user wants to use tensorboard
                 # calculate loss for each batch for each epoch
-                tloss, modified_input, sense_matrix, _ = sess.run(
-                    [train_model.loss, train_model.model.specialized_modifier, train_model.model.senseMatrix, train_model.train_op],
+                tloss, sense_matrix, _ = sess.run(
+                    [train_model.loss, train_model.model.senseMatrix, train_model.train_op],
                     feed_dict={train_model.is_training: True,
                                train_model.original_vector: td.compound_batches[tidx],
                                train_model.model._u: td.modifier_batches[tidx],
@@ -111,13 +116,10 @@ def train(args, wsdmodel, training_data, validation_data, gensimmodel):
             logger.info("(%d) epoch %d - train loss: %.5f validation loss: %.5f" % (
             current_patience, epoch, train_loss, validation_loss))
             epoch += 1
-        for el in modified_input:
-
-            mod_embeddings.write(str(el))
     return (train_losses, validation_losses, lowest_loss, best_epoch, saver, sense_matrix)
 
 
-def predict(args, saver, model_file, data, wsd_model, lookup_table):
+def predict(args, saver, model_file, data, wsd_model, lookup_table, both_positions):
     predictions = []
 
     logger.info("Loading best model from %s" % model_file)
@@ -129,7 +131,8 @@ def predict(args, saver, model_file, data, wsd_model, lookup_table):
                                             lookup_table=lookup_table,
                                             learning_rate=args.learning_rate,
                                             run_mode=RunMode.validation,
-                                            alpha=0.7)
+                                            alpha=0.7,
+                                       both_positions=both_positions)
             if saver != None:
                 saver.restore(sess, model_file)
 
@@ -189,17 +192,24 @@ if __name__ == '__main__':
     parser.add_argument("--unknown_w2_key", type=str,
                         help="string corresponding to the unknown word 2 embedding in the embedding file",
                         default="<unk_w2>")
+    parser.add_argument("--wsd_model", type=str,
+                        choices=["identity_bilinear", "identity_matrix", "identity_bilinear_head", "identity_matrix_head", "both"],
+                        help="which type of word sense disambuguation model should be used", default="identity_matrix")
+    parser.add_argument("--glove", type=str, default="/Users/neelewitte/Desktop/progamming/glove/twe-lemmas.bin")
     parser.add_argument("--batch_size", type=int, help="how many instances should be contained in one batch?",
                         default=100)
     parser.add_argument("--patience", type=int, help="number of epochs to wait after the best model", default=5)
     parser.add_argument("--learning_rate", type=float, help="learning rate for optimization", default=0.05)
     parser.add_argument("--seed", type=int, help="number to which random seed is set", default=1)
-    parser.add_argument("--save_path", type=str, help="file path to save the best model", default="./models")
-    parser.add_argument("--vocab_size", type=int, help="number of words to include in the fulllex model", default=33000,
-                        choices=[7132, 25619])
+    parser.add_argument("--save_path", type=str, help="file path to save the best model", default="/Users/neelewitte/Desktop/progamming/WSD_by_composition/models")
+    parser.add_argument("--vocab_size", type=int, help="number of words to include in the fulllex model", default=24033,
+                        choices=[8080, 24033, 16737])
+    #24033, 8080
     parser.add_argument("--nonlinearity", type=str,
                         help="what kind of nonlinear function should be applied to the model. set to 'identity' if no nonlinearity should be applied",
                         default='tanh', choices=["tanh", "identity"])
+    parser.add_argument("--dropout", type=float, help="dropout rate", default=0.7)
+
     args = parser.parse_args()
 
     # log cpu/gpu info, prevent allocating so much memory
@@ -230,8 +240,29 @@ if __name__ == '__main__':
         "identity": tf.identity
     }
 
+    wsd_models = {
+        "identity_bilinear_head": Identity_Model_Head_bilinear(vocab_size=args.vocab_size, no_senses=2,
+                                                          dropout_bilinear_forms=args.dropout, dropout_matrix=args.dropout),
+        "identity_bilinear_mod": Identity_Model_Mod_bilinear(vocab_size=args.vocab_size, no_senses=2,
+                                                          dropout_bilinear_forms=args.dropout, dropout_matrix=args.dropout),
+        "identity_matrix": Identity_Model(vocab_size=args.vocab_size, no_senses=2),
+        "identity_matrix_head": Identity_Model_Head(vocab_size=args.vocab_size, no_senses=2),
+        "both" : Identity_Model_bilineaer_both_positions(vocab_size=args.vocab_size, no_senses=3,
+                                                          dropout_bilinear_forms=args.dropout, dropout_matrix=args.dropout)
+    }
     # read in the wordembeddings
     gensim_model = Data.read_word_embeddings(args.embeddings)
+    #glove_model = Data.read_word_embeddings(args.glove)
+    #glove_model = Data.read_word_embeddings("/Users/neelewitte/Desktop/progamming/glove/twe-adj-n.bin")
+
+    print("vocab small")
+    print(len(gensim_model.wv.vocab))
+    print("vocab big")
+    #print(len(glove_model.wv.vocab))
+    #sense_embedding_model = Data.read_word_embeddings("/Users/neelewitte/Desktop/progamming/sense_embeddings/nn_matrix_head.txt")
+    #sense_embedding_model = Data.read_word_embeddings("/Users/neelewitte/Desktop/progamming/sense_embeddings/adjN_matrix_head.txt")
+    #sense_embedding_model = Data.read_word_embeddings("/Users/neelewitte/Desktop/progamming/sense_embeddings/adjN_matrix_head.txt")
+
     logger.info("Read embeddings from %s." % args.embeddings)
 
     # generate batches from data
@@ -254,13 +285,23 @@ if __name__ == '__main__':
     tf.set_random_seed(args.seed)
 
     saver = None
-    wsdmodel = Identity_Model(vocab_size=args.vocab_size, no_senses=2)
-    train_losses, validation_losses, best_loss, best_epoch, saver, sense_matrix = train(args, wsdmodel, training_data, validation_data, gensim_model)
-    print(Evaluation.calculate_cosinedistance(sense_matrix, gensim_model))
-    #print(Evaluation.get_nearest_neighbours(sense_matrix, gensim_model))
+    both_positions = False
+    if args.wsd_model == "both":
+        both_positions = True
+
+    wsdmodel = wsd_models[args.wsd_model]
+    print("training starts")
+    train_losses, validation_losses, best_loss, best_epoch, saver, sense_matrix = train(args, wsdmodel, training_data, validation_data, gensim_model, both_positions)
     logger.info("Training ended. Best epoch: %d, best loss: %.5f" % (best_epoch, best_loss))
-    dev_predictions, dev_loss = predict(args, saver, args.model_path, validation_data, wsdmodel, lookup_table)
+    dev_predictions, dev_loss = predict(args, saver, args.model_path, validation_data, wsdmodel, lookup_table, both_positions)
     save_predictions(dev_predictions, validation_data,
                      str(Path(args.save_path).joinpath(args.save_name + "_dev_predictions.txt")))
+
+    #sense_embeddings = "/Users/neelewitte/Desktop/progamming/sense_embeddings/adjN_bilinear_head.txt"
+    #Evaluation.write_sensevectors_to_gensimfile(sense_matrix, sense_embeddings, gensim_model)
+
+    #print(Evaluation.get_nearest_neighbours_of_new_vspace(sense_matrix=sense_matrix, gensimmodel=gensim_model, sensimmodel=glove_model, write_to_file=True,
+     #                                    threshold_distance=0.05, filename="/Users/neelewitte/Desktop/progamming/adjN_matrix_mod_nvspace.txt"))
+    print(Evaluation.get_nearestn_of_original_vspace(sense_matrix=sense_matrix, gensimmodel=gensim_model, threshold_distance=0.2, filename="/Users/neelewitte/Desktop/progamming/both_positions_bili_3senses.txt", write_to_file=True))
     do_eval(logger=logger, args=args, split="dev", loss=dev_loss, word_embeddings=gensim_model)
-    #logger.info("dev loss %.5f" % dev_loss)
+    logger.info("dev loss %.5f" % dev_loss)

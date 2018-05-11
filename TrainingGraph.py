@@ -10,7 +10,7 @@ class RunMode(Enum):
     prediction = 3
 
 class TrainingGraph():
-    def __init__(self, wsd_model, batch_size, lookup_table, learning_rate, run_mode, alpha):
+    def __init__(self, wsd_model, batch_size, lookup_table, learning_rate, run_mode, alpha, both_positions):
         self._model = wsd_model
         self._is_training = self.model._is_training
 
@@ -18,8 +18,14 @@ class TrainingGraph():
         self._original_embeddings = tf.nn.embedding_lookup(params=lookup_table, ids=self._original_vector)
 
         self._predictions = self._model._architecture_normalized
-        self._selection_weights = self._model._selection_weights
-        self._loss = self.get_loss(alpha)
+
+        if both_positions:
+            self._selection_weights_mod = self._model._selection_weights_mod
+            self._selection_weights_head = self._model._selection_weights_head
+        else:
+            self._selection_weights = self._model._selection_weights
+
+        self._loss = self.get_loss(alpha, both_positions)
 
         self._train_op = tf.no_op()
 
@@ -28,10 +34,15 @@ class TrainingGraph():
 
 
 
-    def get_loss(self, alpha):
+    def get_loss(self, alpha, both_positions):
         l1 = tf.losses.cosine_distance(labels=self._original_embeddings,
                                                predictions=self._predictions, axis=1, reduction=tf.losses.Reduction.SUM)
-        l2 = entropy(self._selection_weights, True)
+        if both_positions:
+            l2_mod = entropy(self._selection_weights_mod, True)
+            l2_head = entropy(self._selection_weights_head, True)
+            l2 = (l2_mod+l2_head)/2
+        else:
+            l2 = entropy(self._selection_weights, True)
         return l1+alpha*l2
 
     @property
