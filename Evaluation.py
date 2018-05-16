@@ -12,12 +12,7 @@ def get_nearestn_of_original_vspace(sense_matrix, gensimmodel, threshold_distanc
         word = gensimmodel.wv.index2word[idx]
         distance = spatial.distance.cosine(sense1, sense2)
 
-
         if distance > threshold_distance:
-            print("w :" + word)
-            print(gensimmodel.similar_by_vector(sense1))
-            print(gensimmodel.similar_by_vector(sense2))
-            print("\n")
             if write_to_file:
                 f.write("w :" + word + "\n")
                 f.write(str(gensimmodel.similar_by_vector(sense1)))
@@ -25,10 +20,10 @@ def get_nearestn_of_original_vspace(sense_matrix, gensimmodel, threshold_distanc
                 f.write(str(gensimmodel.similar_by_vector(sense2)))
                 f.write("\n")
 
-        heapq.heappush(distances, (distance, word))
+            heapq.heappush(distances, (distance, word))
     if write_to_file:
         f.close()
-    return sorted(distances)
+    return sorted(distances[len(distances)-10:])
 
 def write_sensevectors_to_gensimfile(sense_matrix, filename, gensimmodel):
     f = open(filename, "w")
@@ -65,12 +60,6 @@ def get_nearest_neighbours_of_new_vspace(sense_matrix, gensimmodel, sensimmodel,
         word = gensimmodel.wv.index2word[idx]
         distance = spatial.distance.cosine(sense1, sense2)
         if distance > threshold_distance:
-            print("w :" + word)
-            print("sense 1: \n")
-            print(sensimmodel.similar_by_vector(sense1))
-            print("sense 2: \n")
-            print(sensimmodel.similar_by_vector(sense2))
-            print("\n")
             if write_to_file:
                 f.write("w :" + word + "\n")
                 f.write(str(sensimmodel.similar_by_vector(sense1)))
@@ -81,7 +70,8 @@ def get_nearest_neighbours_of_new_vspace(sense_matrix, gensimmodel, sensimmodel,
 
     if write_to_file:
         f.close()
-    return sorted(distances)
+    print(sorted(distances[len(distances)-10:]))
+    return sorted(distances[len(distances)-10:])
 
 
 

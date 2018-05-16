@@ -47,7 +47,7 @@ def train(args, wsdmodel, training_data, validation_data, gensimmodel, both_posi
                                         lookup_table=lookup_table,
                                         learning_rate=args.learning_rate,
                                         run_mode=RunMode.training,
-                                        alpha=0.7,
+                                        alpha=0.0,
                                         both_positions=both_positions)
         with tf.variable_scope("model", reuse=True):
             validation_model = TrainingGraph(wsd_model=wsdmodel,
@@ -55,7 +55,7 @@ def train(args, wsdmodel, training_data, validation_data, gensimmodel, both_posi
                                              lookup_table=lookup_table,
                                              learning_rate=args.learning_rate,
                                              run_mode=RunMode.validation,
-                                             alpha=0.7,
+                                             alpha=0.0,
                                              both_positions=both_positions)
 
         # init all variables
@@ -63,7 +63,7 @@ def train(args, wsdmodel, training_data, validation_data, gensimmodel, both_posi
         print("graphs are created")
         saver = tf.train.Saver(max_to_keep=0)
         while current_patience < args.patience:
-        #while epoch < 7:
+        #while epoch < 2:
 
             train_loss = 0.0
             validation_loss = 0.0
@@ -157,7 +157,6 @@ def do_eval(logger, args, split, loss, word_embeddings):
     logger.info("%s loss %.5f" % (split, loss))
     predictions_file = str(Path(args.save_path).joinpath(args.save_name + "_%s_predictions.txt" % split))
     ranks_file = str(Path(args.save_path).joinpath(args.save_name + "_%s_ranks.txt" % split))
-
     ranks = evaluation.get_all_ranks(predictions_file=predictions_file, word_embeddings=word_embeddings,
         max_rank=1000, batch_size=100, path_to_ranks=ranks_file)
     logger.info("%s quartiles" % split)
@@ -183,6 +182,9 @@ if __name__ == '__main__':
     parser.add_argument("embeddings", type=str,
                         help="path to the file that contains word embeddings, format: .bin/.txt")
     parser.add_argument("data_dir", type=str, help="path to the directory that contains the train/test/dev data")
+    parser.add_argument("--all_embeddings", type=str, help="path to the file that contains the embeddings with all vocabulary")
+    parser.add_argument("--new_vspace", type=str, help="path to the file that will contain the sense specific embeddings")
+    parser.add_argument("--nn_filename", type=str, help="path to save nearest neighbours")
     parser.add_argument("--unknown_phrase_key", type=str,
                         help="string corresponding to the unknown phrase embedding in the embedding file",
                         default="<unk>")
@@ -199,12 +201,15 @@ if __name__ == '__main__':
     parser.add_argument("--batch_size", type=int, help="how many instances should be contained in one batch?",
                         default=100)
     parser.add_argument("--patience", type=int, help="number of epochs to wait after the best model", default=5)
-    parser.add_argument("--learning_rate", type=float, help="learning rate for optimization", default=0.05)
+    parser.add_argument("--learning_rate", type=float, help="learning rate for optimization", default=0.04)
     parser.add_argument("--seed", type=int, help="number to which random seed is set", default=1)
-    parser.add_argument("--save_path", type=str, help="file path to save the best model", default="/Users/neelewitte/Desktop/progamming/WSD_by_composition/models")
+    parser.add_argument("--save_path", type=str, help="file path to save the best model", default="/home/neele/programmieren/WSD_by_composition/models")
     parser.add_argument("--vocab_size", type=int, help="number of words to include in the fulllex model", default=24033,
                         choices=[8080, 24033, 16737])
     #24033, 8080
+    parser.add_argument("--use_nvspace",action='store_true', default=False)
+    parser.add_argument("--big_embedding_nn", type=str)
+    parser.add_argument("--new_vspace_nn", type=str)
     parser.add_argument("--nonlinearity", type=str,
                         help="what kind of nonlinear function should be applied to the model. set to 'identity' if no nonlinearity should be applied",
                         default='tanh', choices=["tanh", "identity"])
@@ -243,23 +248,25 @@ if __name__ == '__main__':
     wsd_models = {
         "identity_bilinear_head": Identity_Model_Head_bilinear(vocab_size=args.vocab_size, no_senses=2,
                                                           dropout_bilinear_forms=args.dropout, dropout_matrix=args.dropout),
-        "identity_bilinear_mod": Identity_Model_Mod_bilinear(vocab_size=args.vocab_size, no_senses=2,
+        "identity_bilinear": Identity_Model_Mod_bilinear(vocab_size=args.vocab_size, no_senses=2,
                                                           dropout_bilinear_forms=args.dropout, dropout_matrix=args.dropout),
         "identity_matrix": Identity_Model(vocab_size=args.vocab_size, no_senses=2),
         "identity_matrix_head": Identity_Model_Head(vocab_size=args.vocab_size, no_senses=2),
-        "both" : Identity_Model_bilineaer_both_positions(vocab_size=args.vocab_size, no_senses=3,
+        "both" : Identity_Model_bilineaer_both_positions(vocab_size=args.vocab_size, no_senses=2,
                                                           dropout_bilinear_forms=args.dropout, dropout_matrix=args.dropout)
     }
     # read in the wordembeddings
     gensim_model = Data.read_word_embeddings(args.embeddings)
     #glove_model = Data.read_word_embeddings(args.glove)
     #glove_model = Data.read_word_embeddings("/Users/neelewitte/Desktop/progamming/glove/twe-adj-n.bin")
-
+    print("use new space")
+    print(args.use_nvspace)
     print("vocab small")
     print(len(gensim_model.wv.vocab))
     print("vocab big")
     #print(len(glove_model.wv.vocab))
-    #sense_embedding_model = Data.read_word_embeddings("/Users/neelewitte/Desktop/progamming/sense_embeddings/nn_matrix_head.txt")
+    if args.use_nvspace:
+        sense_embedding_model = Data.read_word_embeddings(args.new_vspace)
     #sense_embedding_model = Data.read_word_embeddings("/Users/neelewitte/Desktop/progamming/sense_embeddings/adjN_matrix_head.txt")
     #sense_embedding_model = Data.read_word_embeddings("/Users/neelewitte/Desktop/progamming/sense_embeddings/adjN_matrix_head.txt")
 
@@ -298,10 +305,22 @@ if __name__ == '__main__':
                      str(Path(args.save_path).joinpath(args.save_name + "_dev_predictions.txt")))
 
     #sense_embeddings = "/Users/neelewitte/Desktop/progamming/sense_embeddings/adjN_bilinear_head.txt"
-    #Evaluation.write_sensevectors_to_gensimfile(sense_matrix, sense_embeddings, gensim_model)
+    print(args.use_nvspace)
+    if args.use_nvspace:
+        #print(Evaluation.get_nearest_neighbours_of_new_vspace(sense_matrix=sense_matrix, gensimmodel=gensim_model,
+         #                                                     sensimmodel=glove_model, write_to_file=True,
+          #                                                    threshold_distance=0.03, filename=args.big_embedding_nn))
+        print(Evaluation.get_nearest_neighbours_of_new_vspace(sense_matrix=sense_matrix, gensimmodel=gensim_model,
+                                                              sensimmodel=sense_embedding_model, write_to_file=True,
+                                                              threshold_distance=0.03, filename=args.new_vspace_nn))
 
-    #print(Evaluation.get_nearest_neighbours_of_new_vspace(sense_matrix=sense_matrix, gensimmodel=gensim_model, sensimmodel=glove_model, write_to_file=True,
-     #                                    threshold_distance=0.05, filename="/Users/neelewitte/Desktop/progamming/adjN_matrix_mod_nvspace.txt"))
-    print(Evaluation.get_nearestn_of_original_vspace(sense_matrix=sense_matrix, gensimmodel=gensim_model, threshold_distance=0.2, filename="/Users/neelewitte/Desktop/progamming/both_positions_bili_3senses.txt", write_to_file=True))
+    else:
+        #Evaluation.write_sensevectors_to_gensimfile(sense_matrix, args.new_vspace, gensim_model)
+        #Evaluation.get_nearestn_of_original_vspace(sense_matrix=sense_matrix, gensimmodel=gensim_model,
+         #                                          threshold_distance=0.2, filename=args.nn_filename,
+          #                                         write_to_file=True)
+        print("sense vectors have been written")
+
+    print(Evaluation.get_nearestn_of_original_vspace(sense_matrix=sense_matrix, gensimmodel=gensim_model, threshold_distance=0.2, filename=args.nn_filename, write_to_file=False))
     do_eval(logger=logger, args=args, split="dev", loss=dev_loss, word_embeddings=gensim_model)
     logger.info("dev loss %.5f" % dev_loss)
